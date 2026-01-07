@@ -2,48 +2,47 @@ from flask import Flask, request, Response
 from flask_cors import CORS
 import yt_dlp
 import requests
-import re
 
 app = Flask(__name__)
 CORS(app)
-
-def limpiar_nombre(text):
-    # Quita caracteres que no le gustan a Windows/Android en nombres de archivos
-    return re.sub(r'[\\/*?:"<>|]', "", text)
 
 @app.route('/descargar')
 def descargar():
     url = request.args.get('url')
     if not url:
-        return "Error: Falta URL", 400
+        return "Error: Pega un link de YouTube", 400
     
+    # Configuramos yt-dlp para obtener el link de audio
     ydl_opts = {
         'format': 'bestaudio/best',
         'noplaylist': True,
-        'quiet': True
+        'quiet': True,
     }
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             link_directo = info['url']
-            # Obtenemos el título real y lo limpiamos
-            titulo_sucio = info.get('title', 'musica_tacoeduardo')
-            titulo_final = limpiar_nombre(titulo_sucio)
+            titulo = info.get('title', 'musica_tacoeduardo').replace('"', '')
 
-            # Hacemos el tunel de datos (streaming)
-            req = requests.get(link_directo, stream=True)
+            # En lugar de redireccionar, nosotros descargamos y enviamos el flujo
+            # Esto evita que el navegador bloquee la descarga
+            response = requests.get(link_directo, stream=True)
             
-            # El secreto está en 'Content-Disposition'
+            def generate():
+                for chunk in response.iter_content(chunk_size=4096):
+                    yield chunk
+
             return Response(
-                req.iter_content(chunk_size=1024*1024), # Procesamos por bloques de 1MB
+                generate(),
                 content_type='audio/mpeg',
                 headers={
-                    "Content-Disposition": f"attachment; filename=\"{titulo_final}.mp3\""
+                    "Content-Disposition": f"attachment; filename=\"{titulo}.mp3\"",
+                    "Access-Control-Allow-Origin": "*"
                 }
             )
     except Exception as e:
-        return f"Error: {str(e)}", 500
+        return f"Error en el motor: {str(e)}", 500
 
 if __name__ == "__main__":
     app.run()
